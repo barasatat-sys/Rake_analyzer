@@ -5,16 +5,14 @@ import plotly.express as px
 from oauth2client.service_account import ServiceAccountCredentials
 
 # ==========================================
-# ⚙️ CONFIGURATION & CREDENTIALS
+# ⚙️ SYSTEM CONFIGURATION
 # ==========================================
-# Updated to your exact Google Sheet name
 GOOGLE_SHEET_NAME = "TO_DO_LIST" 
 
-# Hardcoded Authentication
+# Security Credentials
 CORRECT_USER = "admin777"
 CORRECT_PASS = "777"
 
-# Set up page configuration
 st.set_page_config(page_title="Rake Fault Analytics", page_icon="🚊", layout="wide")
 
 # ==========================================
@@ -46,24 +44,52 @@ def inject_watermark():
     )
 
 # ==========================================
-# 🔌 GOOGLE SHEETS CONNECTION ENGINE
+# 🔌 AUTO-REPAIR GOOGLE CONNECTION ENGINE
 # ==========================================
-@st.cache_resource(ttl=60)  # Caches connection for 1 minute to stay fast
+@st.cache_resource(ttl=20)
 def get_google_sheet_client():
     try:
         scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
         
-        # Convert Streamlit Secrets proxy to a standard Python dictionary
-        creds_dict = dict(st.secrets["gcp_service_account"])
-        
-        # Clean up any potential copy-paste newline corruptions in the private key
-        if "\\n" in creds_dict["private_key"]:
-            creds_dict["private_key"] = creds_dict["private_key"].replace("\\n", "\n")
+        if "gcp_service_account" not in st.secrets:
+            st.error("❌ Configuration Error: Please ensure secrets are added to your Streamlit dashboard settings.")
+            return None
             
+        # Import credentials safely
+        creds_dict = dict(st.secrets["gcp_service_account"])
+        raw_key = creds_dict.get("private_key", "")
+        
+        # 🔥 ULTRA RESILIENT AUTO-REPAIR ENGINE FOR PADDING & NEWLINES
+        # 1. Clean up literal character escapes
+        cleaned_key = raw_key.replace("\\n", "\n").replace("\\blank", "").strip()
+        
+        # 2. Reconstruct headers if stripped or corrupted
+        if "-----BEGIN PRIVATE KEY-----" not in cleaned_key:
+            cleaned_key = "-----BEGIN PRIVATE KEY-----\n" + cleaned_key
+        if "-----END PRIVATE KEY-----" not in cleaned_key:
+            cleaned_key = cleaned_key + "\n-----END PRIVATE KEY-----\n"
+            
+        # 3. Fix internal formatting and line wrapping
+        lines = [line.strip() for line in cleaned_key.split("\n") if line.strip()]
+        if len(lines) > 2:
+            header = lines[0]
+            footer = lines[-1]
+            body = "".join(lines[1:-1]).replace(" ", "")
+            
+            # Auto-adjust base64 string padding lengths
+            missing_padding = len(body) % 4
+            if missing_padding:
+                body += '=' * (4 - missing_padding)
+                
+            # Piece it back together into standard standard format
+            cleaned_key = f"{header}\n{body}\n{footer}\n"
+            
+        creds_dict["private_key"] = cleaned_key
+        
         creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
         return gspread.authorize(creds)
     except Exception as e:
-        st.error(f"Google Connection Failed: {e}")
+        st.error(f"🔌 Connection Sync Failed: {e}")
         return None
 
 def fetch_tab_data(tab_name):
@@ -74,12 +100,12 @@ def fetch_tab_data(tab_name):
             records = sheet.get_all_records()
             return pd.DataFrame(records), sheet
         except Exception as e:
-            st.error(f"Error loading tab '{tab_name}': {e}")
+            st.error(f"⚠️ Tab Reference Error '{tab_name}': {e}")
             return pd.DataFrame(), None
     return pd.DataFrame(), None
 
 # ==========================================
-# 🔑 LOGIN INTERFACE SETUP
+# 🔑 LOGIN ACCESS CONTROL
 # ==========================================
 if "authenticated" not in st.session_state:
     st.session_state.authenticated = False
@@ -91,12 +117,12 @@ if not st.session_state.authenticated:
     with st.form("login_form"):
         username = st.text_input("User ID", placeholder="Enter Admin ID")
         password = st.text_input("Password", type="password", placeholder="Enter Password")
-        login_button = st.form_submit_with_clicked_button() if hasattr(st, "form_submit_with_clicked_button") else st.form_submit_button("Access System")
+        login_button = st.form_submit_button("Access System")
         
         if login_button:
             if username == CORRECT_USER and password == CORRECT_PASS:
                 st.session_state.authenticated = True
-                st.success("Access Granted! Loading system logs...")
+                st.success("Access Granted! Syncing data streams...")
                 st.rerun()
             else:
                 st.error("Invalid Security Credentials. Access Denied.")
@@ -105,30 +131,27 @@ if not st.session_state.authenticated:
     st.stop()
 
 # ==========================================
-# 📊 LIVE DASHBOARD INTERFACE (LOGGED IN)
+# 📊 LIVE DATA PLATFORM
 # ==========================================
 st.title("🚊 Rake Fault Analytics Control Center")
 
-# Sidebar navigation options
 st.sidebar.header("Navigation Control")
 selected_tab = st.sidebar.selectbox("Select Target Data View", ["_AT Tab", "_RAIL Tab"])
 sheet_tab_map = {"_AT Tab": "_AT", "_RAIL Tab": "_RAIL"}
 
-# Load the raw data from Google Sheets based on selection
+# Download spreadsheet data
 df, active_worksheet = fetch_tab_data(sheet_tab_map[selected_tab])
 
 if not df.empty:
-    # Scan for common status column configurations
+    # Identify case-insensitive column names safely
+    df.columns = [str(c).strip() for c in df.columns]
     status_col = None
     for col in df.columns:
-        if col.strip().lower() in ['status', 'fault status', 'state']:
+        if col.lower() in ['status', 'fault status', 'state', 'condition']:
             status_col = col
             break
 
-    # Standardize column strings for cleaner filtering
-    df.columns = [str(c).strip() for c in df.columns]
-
-    # --- TOP ROW METRICS ---
+    # --- TOP METRIC BARS ---
     st.markdown("### 📈 Real-Time KPIs")
     m1, m2, m3 = st.columns(3)
     m1.metric("Total Logged Events", len(df))
@@ -139,12 +162,12 @@ if not df.empty:
         m2.metric("Active Open Faults", open_count, delta=f"{open_count} Pending", delta_color="inverse")
         m3.metric("Resolved Closed Faults", closed_count, delta=f"{closed_count} Fixed")
     else:
-        m2.metric("Active Open Faults", "N/A - No Status Col")
-        m3.metric("Resolved Closed Faults", "N/A - No Status Col")
+        m2.metric("Active Open Faults", "N/A")
+        m3.metric("Resolved Closed Faults", "N/A")
 
     st.markdown("---")
 
-    # --- MAIN SYSTEM VIEWS ---
+    # --- DATA PANELS ---
     view_mode = st.radio("Display Mode", ["Data Explorer Table", "Analytical Charts", "Update Operational Status"], horizontal=True)
 
     if view_mode == "Data Explorer Table":
@@ -158,12 +181,11 @@ if not df.empty:
                          color_discrete_sequence=px.colors.qualitative.Pastel)
             st.plotly_chart(fig, use_container_width=True)
         else:
-            st.info("Please verify your Google Sheet template contains a column labeled exactly 'Status' to render visual analytics.")
+            st.info("To view metric visualization graphs, ensure your sheet columns include a header named 'Status'.")
 
     elif view_mode == "Update Operational Status":
         st.markdown("### 📝 Modify Worksheet Records")
         if status_col:
-            # Let the user pick a row based on index identifier
             row_to_update = st.selectbox("Select Row ID / Index to Update", df.index.tolist())
             current_status = df.loc[row_to_update, status_col]
             
@@ -172,25 +194,22 @@ if not df.empty:
             
             if st.button("Commit Status Overwrite to Google Cloud"):
                 try:
-                    # Excel/Google sheets lists index from 1, and row 1 is header row, so row index equals df_index + 2
                     gspread_row_num = int(row_to_update) + 2 
                     gspread_col_num = df.columns.get_loc(status_col) + 1
                     
                     active_worksheet.update_cell(gspread_row_num, gspread_col_num, new_status)
-                    st.success(f"Successfully updated Row {gspread_row_num} to '{new_status}' in Google Sheet!")
-                    st.cache_resource.clear() # Clear cache to load fresh changes instantly
+                    st.success(f"Successfully updated Row {gspread_row_num} to '{new_status}'!")
+                    st.cache_resource.clear() 
                     st.rerun()
                 except Exception as ex:
-                    st.error(f"Write operation rejected by API: {ex}")
+                    st.error(f"Write operation rejected: {ex}")
         else:
-            st.warning("Writeback functionality requires a defined 'Status' column header inside your spreadsheet.")
+            st.warning("Updating features require a defined status column track inside the worksheet.")
 else:
-    st.warning(f"Connected to project bucket, but the target tab sheet template could not be loaded. Please ensure your sheet name matches '{GOOGLE_SHEET_NAME}' and contains the structural tabs.")
+    st.info("⏳ Connecting to secure server buckets... Please ensure your Google Drive service account has 'Editor' access permission shared directly to your Google Sheet.")
 
-# Log Out Button Option
 if st.sidebar.button("Secure System Log Out"):
     st.session_state.authenticated = False
     st.rerun()
 
-# Run UI Watermark Injector
 inject_watermark()
