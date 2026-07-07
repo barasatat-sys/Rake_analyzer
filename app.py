@@ -1,20 +1,18 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
-import gspread
-from oauth2client.service_account import ServiceAccountCredentials
 
 # ==========================================
 # ⚙️ SYSTEM CONFIGURATION
 # ==========================================
-# Directly streaming from the secure link you provided
+# Your exact Google Sheet ID from your shared link
 SPREADSHEET_ID = "1ZKTLXv2VQEBG7OUeEo2GoF2Pz4IyYOot"
-EXCEL_URL = f"https://docs.google.com/spreadsheets/d/{SPREADSHEET_ID}/export?format=xlsx"
 
 # Hardcoded Authentication
 CORRECT_USER = "admin777"
 CORRECT_PASS = "777"
 
+# Streamlit page layout rule (Must be first)
 st.set_page_config(page_title="Rake Fault Analytics", page_icon="🚊", layout="wide")
 
 # ==========================================
@@ -46,21 +44,24 @@ def inject_watermark():
     )
 
 # ==========================================
-# 🔌 BULLETPROOF DATA STREAM ENGINE
+# 🔌 ZERO-DEPENDENCY CSV STREAM ENGINE
 # ==========================================
-@st.cache_data(ttl=15)
+@st.cache_data(ttl=10)
 def fetch_tab_data(tab_name):
     try:
-        # Bypasses all secret key parsing errors completely by downloading via direct secure link link
-        df = pd.read_excel(EXCEL_URL, sheet_name=tab_name)
+        # Bypasses openpyxl completely by pulling data through Google's native CSV export endpoint
+        csv_url = f"https://docs.google.com/spreadsheets/d/{SPREADSHEET_ID}/gviz/tq?tqx=out:csv&sheet={tab_name}"
+        df = pd.read_csv(csv_url)
         return df
     except Exception as e:
-        st.error(f"⚠️ Sheet Link Streaming Error: {e}")
+        st.error(f"⚠️ Live Data Link Stream Blocked: {e}")
         return pd.DataFrame()
 
 def get_gspread_worksheet(tab_name):
-    # Safe gspread connection wrapper so write back functions don't crash the frontend UI
+    # Isolated write-back connection to prevent any invalid keys from breaking the application view
     try:
+        import gspread
+        from oauth2client.service_account import ServiceAccountCredentials
         if "gcp_service_account" in st.secrets:
             scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
             creds_dict = dict(st.secrets["gcp_service_account"])
@@ -74,7 +75,7 @@ def get_gspread_worksheet(tab_name):
     return None
 
 # ==========================================
-# 🔑 LOGIN ACCESS CONTROL
+# 🔑 LOGIN SYSTEM
 # ==========================================
 if "authenticated" not in st.session_state:
     st.session_state.authenticated = False
@@ -91,7 +92,7 @@ if not st.session_state.authenticated:
         if login_button:
             if username == CORRECT_USER and password == CORRECT_PASS:
                 st.session_state.authenticated = True
-                st.success("Access Granted! Syncing data streams...")
+                st.success("Access Granted! Fetching tables...")
                 st.rerun()
             else:
                 st.error("Invalid Security Credentials. Access Denied.")
@@ -100,19 +101,19 @@ if not st.session_state.authenticated:
     st.stop()
 
 # ==========================================
-# 📊 LIVE DATA PLATFORM
+# 📊 CONTROL INTERFACE
 # ==========================================
-st.title("𚊠 Rake Fault Analytics Control Center")
+st.title("🚊 Rake Fault Analytics Control Center")
 
 st.sidebar.header("Navigation Control")
 selected_tab = st.sidebar.selectbox("Select Target Data View", ["_AT Tab", "_RAIL Tab"])
 sheet_tab_map = {"_AT Tab": "_AT", "_RAIL Tab": "_RAIL"}
 
-# Load table dataframe safely
+# Stream the data live
 df = fetch_tab_data(sheet_tab_map[selected_tab])
 
 if not df.empty:
-    # Clean up and normalize columns
+    # Safely align and look for status metrics
     df.columns = [str(c).strip() for c in df.columns]
     status_col = None
     for col in df.columns:
@@ -120,7 +121,7 @@ if not df.empty:
             status_col = col
             break
 
-    # --- TOP METRIC BARS ---
+    # --- TOP ROW METRIC PANELS ---
     st.markdown("### 📈 Real-Time KPIs")
     m1, m2, m3 = st.columns(3)
     m1.metric("Total Logged Events", len(df))
@@ -136,7 +137,7 @@ if not df.empty:
 
     st.markdown("---")
 
-    # --- DATA PANELS ---
+    # --- APP NAVIGATION PANELS ---
     view_mode = st.radio("Display Mode", ["Data Explorer Table", "Analytical Charts", "Update Operational Status"], horizontal=True)
 
     if view_mode == "Data Explorer Table":
@@ -150,17 +151,17 @@ if not df.empty:
                          color_discrete_sequence=px.colors.qualitative.Pastel)
             st.plotly_chart(fig, use_container_width=True)
         else:
-            st.info("To view metric charts, ensure your worksheet contains a column titled 'Status'.")
+            st.info("To view visual pie metrics, ensure your spreadsheet rows have an explicit column named 'Status'.")
 
     elif view_mode == "Update Operational Status":
         st.markdown("### 📝 Modify Worksheet Records")
         
-        # Verify write back access
+        # Safe check for write permission hooks
         active_worksheet = get_gspread_worksheet(sheet_tab_map[selected_tab])
         
         if active_worksheet is None:
-            st.warning("⚠️ **Viewing Data is Live, but Save Access is Locked.**")
-            st.info("To enable real-time updates directly from this page, make sure the text pasted inside your Streamlit Secrets box contains the entire, multi-line private key from Google.")
+            st.warning("⚠️ **Live Table View is Active, but Database Save Access is Locked.**")
+            st.info("Your data is displaying successfully! If you want to use this specific tab to modify statuses back to the sheet, fix the formatting of the private key inside your Streamlit Advanced Secrets box.")
         elif status_col:
             row_to_update = st.selectbox("Select Row ID / Index to Update", df.index.tolist())
             current_status = df.loc[row_to_update, status_col]
@@ -180,9 +181,9 @@ if not df.empty:
                 except Exception as ex:
                     st.error(f"Write operation rejected: {ex}")
         else:
-            st.warning("Updating features require a defined status column track inside the worksheet.")
+            st.warning("Spreadsheet track requires a defined 'Status' column header to utilize write-back operations.")
 else:
-    st.info("⏳ Connecting to secure spreadsheet server... Verification pending.")
+    st.info("⏳ Synchronizing to cloud table link channels...")
 
 if st.sidebar.button("Secure System Log Out"):
     st.session_state.authenticated = False
