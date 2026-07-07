@@ -1,15 +1,17 @@
 import streamlit as st
-import gspread
 import pandas as pd
 import plotly.express as px
+import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 
 # ==========================================
 # ⚙️ SYSTEM CONFIGURATION
 # ==========================================
-GOOGLE_SHEET_NAME = "TO_DO_LIST" 
+# Directly streaming from the secure link you provided
+SPREADSHEET_ID = "1ZKTLXv2VQEBG7OUeEo2GoF2Pz4IyYOot"
+EXCEL_URL = f"https://docs.google.com/spreadsheets/d/{SPREADSHEET_ID}/export?format=xlsx"
 
-# Security Credentials
+# Hardcoded Authentication
 CORRECT_USER = "admin777"
 CORRECT_PASS = "777"
 
@@ -44,65 +46,32 @@ def inject_watermark():
     )
 
 # ==========================================
-# 🔌 AUTO-REPAIR GOOGLE CONNECTION ENGINE
+# 🔌 BULLETPROOF DATA STREAM ENGINE
 # ==========================================
-@st.cache_resource(ttl=20)
-def get_google_sheet_client():
-    try:
-        scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-        
-        if "gcp_service_account" not in st.secrets:
-            st.error("❌ Configuration Error: Please ensure secrets are added to your Streamlit dashboard settings.")
-            return None
-            
-        # Import credentials safely
-        creds_dict = dict(st.secrets["gcp_service_account"])
-        raw_key = creds_dict.get("private_key", "")
-        
-        # 🔥 ULTRA RESILIENT AUTO-REPAIR ENGINE FOR PADDING & NEWLINES
-        # 1. Clean up literal character escapes
-        cleaned_key = raw_key.replace("\\n", "\n").replace("\\blank", "").strip()
-        
-        # 2. Reconstruct headers if stripped or corrupted
-        if "-----BEGIN PRIVATE KEY-----" not in cleaned_key:
-            cleaned_key = "-----BEGIN PRIVATE KEY-----\n" + cleaned_key
-        if "-----END PRIVATE KEY-----" not in cleaned_key:
-            cleaned_key = cleaned_key + "\n-----END PRIVATE KEY-----\n"
-            
-        # 3. Fix internal formatting and line wrapping
-        lines = [line.strip() for line in cleaned_key.split("\n") if line.strip()]
-        if len(lines) > 2:
-            header = lines[0]
-            footer = lines[-1]
-            body = "".join(lines[1:-1]).replace(" ", "")
-            
-            # Auto-adjust base64 string padding lengths
-            missing_padding = len(body) % 4
-            if missing_padding:
-                body += '=' * (4 - missing_padding)
-                
-            # Piece it back together into standard standard format
-            cleaned_key = f"{header}\n{body}\n{footer}\n"
-            
-        creds_dict["private_key"] = cleaned_key
-        
-        creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
-        return gspread.authorize(creds)
-    except Exception as e:
-        st.error(f"🔌 Connection Sync Failed: {e}")
-        return None
-
+@st.cache_data(ttl=15)
 def fetch_tab_data(tab_name):
-    client = get_google_sheet_client()
-    if client:
-        try:
-            sheet = client.open(GOOGLE_SHEET_NAME).worksheet(tab_name)
-            records = sheet.get_all_records()
-            return pd.DataFrame(records), sheet
-        except Exception as e:
-            st.error(f"⚠️ Tab Reference Error '{tab_name}': {e}")
-            return pd.DataFrame(), None
-    return pd.DataFrame(), None
+    try:
+        # Bypasses all secret key parsing errors completely by downloading via direct secure link link
+        df = pd.read_excel(EXCEL_URL, sheet_name=tab_name)
+        return df
+    except Exception as e:
+        st.error(f"⚠️ Sheet Link Streaming Error: {e}")
+        return pd.DataFrame()
+
+def get_gspread_worksheet(tab_name):
+    # Safe gspread connection wrapper so write back functions don't crash the frontend UI
+    try:
+        if "gcp_service_account" in st.secrets:
+            scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
+            creds_dict = dict(st.secrets["gcp_service_account"])
+            if "\\n" in creds_dict.get("private_key", ""):
+                creds_dict["private_key"] = creds_dict["private_key"].replace("\\n", "\n")
+            creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
+            client = gspread.authorize(creds)
+            return client.open_by_key(SPREADSHEET_ID).worksheet(tab_name)
+    except Exception:
+        return None
+    return None
 
 # ==========================================
 # 🔑 LOGIN ACCESS CONTROL
@@ -133,17 +102,17 @@ if not st.session_state.authenticated:
 # ==========================================
 # 📊 LIVE DATA PLATFORM
 # ==========================================
-st.title("🚊 Rake Fault Analytics Control Center")
+st.title("𚊠 Rake Fault Analytics Control Center")
 
 st.sidebar.header("Navigation Control")
 selected_tab = st.sidebar.selectbox("Select Target Data View", ["_AT Tab", "_RAIL Tab"])
 sheet_tab_map = {"_AT Tab": "_AT", "_RAIL Tab": "_RAIL"}
 
-# Download spreadsheet data
-df, active_worksheet = fetch_tab_data(sheet_tab_map[selected_tab])
+# Load table dataframe safely
+df = fetch_tab_data(sheet_tab_map[selected_tab])
 
 if not df.empty:
-    # Identify case-insensitive column names safely
+    # Clean up and normalize columns
     df.columns = [str(c).strip() for c in df.columns]
     status_col = None
     for col in df.columns:
@@ -181,11 +150,18 @@ if not df.empty:
                          color_discrete_sequence=px.colors.qualitative.Pastel)
             st.plotly_chart(fig, use_container_width=True)
         else:
-            st.info("To view metric visualization graphs, ensure your sheet columns include a header named 'Status'.")
+            st.info("To view metric charts, ensure your worksheet contains a column titled 'Status'.")
 
     elif view_mode == "Update Operational Status":
         st.markdown("### 📝 Modify Worksheet Records")
-        if status_col:
+        
+        # Verify write back access
+        active_worksheet = get_gspread_worksheet(sheet_tab_map[selected_tab])
+        
+        if active_worksheet is None:
+            st.warning("⚠️ **Viewing Data is Live, but Save Access is Locked.**")
+            st.info("To enable real-time updates directly from this page, make sure the text pasted inside your Streamlit Secrets box contains the entire, multi-line private key from Google.")
+        elif status_col:
             row_to_update = st.selectbox("Select Row ID / Index to Update", df.index.tolist())
             current_status = df.loc[row_to_update, status_col]
             
@@ -199,14 +175,14 @@ if not df.empty:
                     
                     active_worksheet.update_cell(gspread_row_num, gspread_col_num, new_status)
                     st.success(f"Successfully updated Row {gspread_row_num} to '{new_status}'!")
-                    st.cache_resource.clear() 
+                    st.cache_data.clear() 
                     st.rerun()
                 except Exception as ex:
                     st.error(f"Write operation rejected: {ex}")
         else:
             st.warning("Updating features require a defined status column track inside the worksheet.")
 else:
-    st.info("⏳ Connecting to secure server buckets... Please ensure your Google Drive service account has 'Editor' access permission shared directly to your Google Sheet.")
+    st.info("⏳ Connecting to secure spreadsheet server... Verification pending.")
 
 if st.sidebar.button("Secure System Log Out"):
     st.session_state.authenticated = False
